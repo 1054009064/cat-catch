@@ -9,7 +9,6 @@
   <script src="lib/jquery.min.js"></script>
   <script src="js/polyfill.js"></script>
   <script src="js/init.js"></script>
-  <script src="js/firefox.js"></script>
   <script src="lib/mux.min.js"></script>
   <script src="js/function.js"></script>
   <script src="js/templates.js"></script>
@@ -161,6 +160,10 @@
                   <button id="tsAddArg" data-i18n="getParameters"></button>
                   <button id="setRequestHeaders" data-i18n="setRequestHeaders"></button>
                   <button id="sendFfmpeg" class="hide button" data-i18n="sendFfmpeg"></button>
+                  <label class="inline-flex textColor">
+                    <input type="checkbox" id="M3u8HideDownloadedSegments" save="change" />
+                    <i18n>hideDownloadedSegments</i18n>
+                  </label>
                   <p>
                     <input type="text" data-i18n-placeholder="regularFilterPlaceholder" id="regular"
                       class="m3u8Regular">

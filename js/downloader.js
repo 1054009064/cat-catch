@@ -120,27 +120,40 @@ function start() {
         if (!fragment.downFileName) {
             fragment.downFileName = getUrlFileName(fragment.url);
         }
-        const html = $(`
-            <div class="downItem">
-                <div class="explain">${fragment.downFileName}</div>
-                <div id="downFilepProgress"></div>
-                <div class="progress-container">
-                    <div class="progress-wrapper">
-                        <div class="progress-bar">
-                            <div class="progress"></div>
-                        </div>
-                    </div>
-                    <button class="cancel-btn">${i18n.stopDownload}</button>
-                </div>
-            </div>`);
+        const html = $(`<div class="downItem">
+                            <div class="explain">${fragment.downFileName}</div>
+                            <div class="down-file-progress"></div>
+                            <div class="progress-container">
+                            <div class="progress-wrapper">
+                                <div class="progress-bar">
+                                <div class="progress"></div>
+                                <span class="progress-text" data-text="0%">0%</span>
+                                </div>
+                            </div>
+                            <button class="cancel-btn">${i18n.stopDownload}</button>
+                            </div>
+                        </div>`);
 
         const $button = html.find("button");
         $button.data("action", "stop");
 
         // 操作对象放入itemDOM 提高效率
         itemDOM.set(fragment.index, {
-            progressText: html.find("#downFilepProgress"),
-            progress: html.find(".progress"),
+            _downFileProgress: html.find(".down-file-progress"),
+            _progressBar: html.find(".progress-bar"),
+            _progressText: html.find(".progress-text"),
+            downFileProgress(text) {
+                this._downFileProgress.text(text);
+                return this;
+            },
+            progress(progress) {
+                const percentage = `${progress}%`;
+                this._progressBar.css("--progress", percentage);
+                this._progressText
+                    .text(percentage)
+                    .attr("data-text", percentage);
+                return this;
+            },
             button: $button
         });
 
@@ -178,29 +191,19 @@ function start() {
         // 通过 lastEmitted 限制更新频率 避免疯狂dom操作
         if (Date.now() - lastEmitted >= 100 && !state) {
             const $dom = itemDOM.get(fragment.index);
-            if (contentLength) {
-                const progress = (receivedLength / contentLength * 100).toFixed(2) + "%";
-                $dom.progress.css("width", progress).html(progress);
-                $dom.progressText.html(`${byteToSize(receivedLength)} / ${byteToSize(contentLength)}`);
-            } else {
-                $dom.progressText.html(`${byteToSize(receivedLength)}`);
-            }
-            if (down.total == 1) {
-                const title = contentLength ?
-                    `${byteToSize(receivedLength)} / ${byteToSize(contentLength)}` :
-                    `${byteToSize(receivedLength)}`;
-                document.title = title;
-            }
+            const text = contentLength ?
+                `${byteToSize(receivedLength)} / ${byteToSize(contentLength)}` :
+                `${byteToSize(receivedLength)}`;
+            $dom.progress((receivedLength / contentLength * 100).toFixed(2)).downFileProgress(text);
+            if (down.total == 1) { document.title = text; }
             lastEmitted = Date.now();
         }
     });
 
     // 单文件下载完成事件
     down.on('completed', function (buffer, fragment) {
-
         const $dom = itemDOM.get(fragment.index);
-        $dom.progress.css("width", "100%").html("100%");
-        $dom.progressText.html(i18n.downloadComplete);
+        $dom.progress(100).downFileProgress(i18n.downloadComplete);
         $dom.button.html(i18n.sendFfmpeg).data("action", "sendFfmpeg");
         document.title = `${down.success}/${down.total}`;
         $dom.button.hide();
@@ -218,11 +221,11 @@ function start() {
         // 发送到ffmpeg
         if (_ffmpeg) {
             sendFile(_ffmpeg, blob, fragment);
-            $dom.progressText.html(i18n.sendFfmpeg);
+            $dom.downFileProgress(i18n.sendFfmpeg);
             return;
         }
 
-        $dom.progressText.html(i18n.saving);
+        $dom.downFileProgress(i18n.saving);
         // 直接下载
         chrome.downloads.download({
             url: URL.createObjectURL(blob),
@@ -262,7 +265,7 @@ function start() {
             setHeaders(fragment, () => { down.stop(fragment.index); down.downloader(fragment); }, _tabId);
             return;
         }
-        itemDOM.get(fragment.index).progressText.html(error);
+        itemDOM.get(fragment.index).downFileProgress(error);
         chrome.tabs.highlight({ tabs: _index });
     });
 
@@ -346,7 +349,7 @@ function start() {
         // 发送状态提示
         if (Message.state == "ok") {
             const $dom = itemDOM.get(Message.index);
-            $dom && $dom.progressText.html(i18n.hasSent);
+            $dom && $dom.downFileProgress(i18n.hasSent);
             down.buffer[Message.index] = null; //清空buffer
         }
 
@@ -371,7 +374,7 @@ function start() {
         down.buffer[fragment.index] = null; //清空buffer
 
         // 更新下载状态
-        itemDOM.get(fragment.index).progressText.html(i18n.downloadComplete);
+        itemDOM.get(fragment.index).downFileProgress(i18n.downloadComplete);
 
         // 完成下载 检查自动关闭
         if (down.success == down.total) {
