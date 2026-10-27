@@ -111,7 +111,7 @@ class FilePreview {
         document.querySelectorAll('.sort-options input').forEach(input => {
             input.addEventListener('change', () => {
                 // 时长需要尝试播放获取，无法直接初始时长排序，不记忆时长排序选项
-                if (input.name == "sortField" && input.value != "duration") {
+                if (input.name == "sortField" && input.value != "duration" && input.value != "resolution") {
                     sessionStorage.setItem("previewSort", input.value);
                 } else if (input.name == "sortOrder") {
                     sessionStorage.setItem("previewOrder", input.value);
@@ -389,8 +389,79 @@ class FilePreview {
                 // Normal comparison for valid durations
                 return order * (a[field] - b[field]);
             });
+        } else if (field == 'resolution') {
+            this.fileItems.sort((a, b) => {
+                const widthA = a?.previewVideo?.width ?? 0;
+                const heightA = a?.previewVideo?.height ?? 0;
+                const widthB = b?.previewVideo?.width ?? 0;
+                const heightB = b?.previewVideo?.height ?? 0;
+                const pixelsA = widthA * heightA;
+                const pixelsB = widthB * heightB;
+                return order * (pixelsA - pixelsB);
+            });
         } else {
             this.fileItems.sort((a, b) => order * (a[field] - b[field]));
+        }
+
+        // // 先把this.fileItems数组对象的 group属性清空
+        // this.fileItems.forEach(item => {
+        //     item.group = null;
+        // });
+        // // 将时间戳相近的文件分组
+        // let group = 1;
+        // for (let i = 0; i < this.fileItems.length - 1; i += 2) {
+        //     const current = this.fileItems[i];
+        //     const next = this.fileItems[i + 1];
+        //     if (Math.abs(current.getTime - next.getTime) <= G.groupTime) {
+        //         current.group = group;
+        //         next.group = group;
+        //         group++;
+        //     }
+        // }
+
+        // 将时间戳相近的文件进行最优分组
+        if (G.showGroup) {
+            // 先把this.fileItems数组对象的 group属性清空
+            this.fileItems.forEach(item => {
+                item.group = null;
+            });
+            // 提取判断逻辑，保持代码整洁（如果后续需要加上 ext/type 的判断，也可以加在这里）
+            const canGroup = (a, b) => {
+                if (!a || !b) return false;
+                return Math.abs(a.getTime - b.getTime) <= G.groupTime
+                    && !(a.type?.startsWith('audio') && b.type?.startsWith('audio'))
+                    && (a.ext === 'm3u8') === (b.ext === 'm3u8');
+            };
+            let group = 1;
+            let i = 0;
+            while (i < this.fileItems.length) {
+                const current = this.fileItems[i];
+                const next1 = this.fileItems[i + 1];
+                const next2 = this.fileItems[i + 2];
+
+                const match1 = canGroup(current, next1);
+                const match2 = canGroup(next1, next2);
+
+                if (match1) {
+                    const diff1 = Math.abs(current.getTime - next1.getTime);
+                    const diff2 = match2 ? Math.abs(next1.getTime - next2.getTime) : Infinity;
+
+                    // 如果下一个和下下个也能成组，并且它们的时间靠得更近
+                    // 则放弃当前的结合，让 current 保持独立，游标只前进 1 步
+                    if (match2 && diff2 < diff1) {
+                        i++;
+                    } else {
+                        // current 和 next1 结合是当前的最优解
+                        current.group = group;
+                        next1.group = group;
+                        group++;
+                        i += 2; // 两项已成功分组，游标前进 2 步
+                    }
+                } else {
+                    // current 和 next1 无法成组，游标前进 1 步继续往下看
+                    i++;
+                }
+            }
         }
 
         // 更新显示
@@ -409,7 +480,7 @@ class FilePreview {
         item.html.className = 'file-item';
         item.html.innerHTML = `
             <div class="file-title ${this.showTitle ? "" : "hide"}">${item.title}</div>
-            <div class="file-name">${item.name}</div>
+            <div class="file-name">${item.group && G.showGroup ? `[${item.group}] ` : ""}${item.name}</div>
             <div class="preview-container">
                 <img src="${item.favIconUrl || 'img/icon.png'}" class="preview-image icon">
             </div>
@@ -433,13 +504,13 @@ class FilePreview {
             this.updateButtonStatus();
         });
         // 复制图标
-        item.html.querySelector('.copy').addEventListener('click', () => this.copy(item));
+        item.html.querySelector('.copy').addEventListener('click', async () => { await getClipboardText(item); this.copy(item); });
         // 删除图标
         item.html.querySelector('.delete').addEventListener('click', () => this.deleteItem(item));
         // 下载图标
-        item.html.querySelector('.download').addEventListener('click', () => this.downloadItem(item));
+        item.html.querySelector('.download').addEventListener('click', async () => { await getClipboardText(item); this.downloadItem(item); });
         // MQTT图标
-        item.html.querySelector('.mqtt').addEventListener('click', () => this.mqtt(item));
+        item.html.querySelector('.mqtt').addEventListener('click', async () => { await getClipboardText(item); this.mqtt(item) });
         // 选中状态 添加对应class
         item._selected = false;
         Object.defineProperty(item, "selected", {
@@ -473,7 +544,7 @@ class FilePreview {
             m3u8.src = 'img/parsing.png';
             m3u8.className = 'icon m3u8';
             m3u8.title = i18n.parser;
-            m3u8.addEventListener('click', () => this.openM3U8(item));
+            m3u8.addEventListener('click', async () => { await getClipboardText(item); this.openM3U8(item) });
             actions.appendChild(m3u8);
         }
 
@@ -483,7 +554,7 @@ class FilePreview {
             aria2.src = 'img/aria2.png';
             aria2.className = 'icon aria2';
             aria2.title = "aria2";
-            aria2.addEventListener('click', () => this.aria2(item));
+            aria2.addEventListener('click', async () => { await getClipboardText(item); this.aria2(item); });
             actions.appendChild(aria2);
         }
 
@@ -493,7 +564,7 @@ class FilePreview {
             invoke.src = 'img/invoke.svg';
             invoke.className = 'icon invoke';
             invoke.title = i18n.invoke;
-            invoke.addEventListener('click', () => this.invoke(item));
+            invoke.addEventListener('click', async () => { await getClipboardText(item); this.invoke(item); });
             actions.appendChild(invoke);
         }
 
@@ -503,7 +574,7 @@ class FilePreview {
             send.src = 'img/send.svg';
             send.className = 'icon send';
             send.title = i18n.send2local;
-            send.addEventListener('click', () => this.send(item));
+            send.addEventListener('click', async () => { await getClipboardText(item); this.send(item); });
             actions.appendChild(send);
         }
 
@@ -606,12 +677,17 @@ class FilePreview {
         Object.defineProperty(data, "pageDOM", {
             get: () => { return this.sourcePageDOM; }
         });
-
-        data.downFileName = G.TitleName ? templates(G.downFileName, data) : data.name;
-        data.downFileName = filterFileName(data.downFileName);
-        if (isEmpty(data.downFileName)) {
-            data.downFileName = data.name;
-        }
+        Object.defineProperty(data, "downFileName", {
+            get() {
+                let downFileName = G.TitleName ? templates(G.downFileName, data) : data.name;
+                downFileName = filterFileName(downFileName);
+                if (isEmpty(downFileName)) {
+                    downFileName = data.name;
+                }
+                return downFileName;
+            },
+            configurable: true
+        });
         data.ext = data.ext ? data.ext : 'Unknown';
         data.type = data.type ? data.type : 'Unknown';
         data.duration = data.duration ? data.duration : -1;
@@ -1091,7 +1167,7 @@ class FilePreview {
         if (!G.getHtmlDOM) { return; }
         try {
             const response = await chrome.tabs.sendMessage(this._tabId, { Message: "getPage" }, { frameId: 0 });
-            this.sourcePageDOM = new DOMParser().parseFromString(response, 'text/html');
+            this.sourcePageDOM = new DOMParser().parseFromString(sanitizeHtmlString(response), 'text/html');
             return this.sourcePageDOM;
         } catch (error) {
             console.warn("Failed to get source page DOM:", error);

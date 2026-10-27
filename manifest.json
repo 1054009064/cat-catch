@@ -1,5 +1,5 @@
 {
-"update_url": "https://clients2.non-google.com/service/update2/crx",
+"update_url": "https://clients2.google.com/service/update2/crx",
 
   "background": {
     "service_worker": "js/background.js"
@@ -36,6 +36,9 @@
     "scripting",
     "sidePanel",
     "contextMenus"
+  ],
+  "optional_permissions": [
+    "clipboardRead"
   ],
   "commands": {
     "_execute_action": {},
@@ -82,6 +85,6 @@
     }
   ],
   "default_locale": "en",
-  "version": "2.7.2",
+  "version": "2.7.4",
   "incognito": "split"
 }

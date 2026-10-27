@@ -67,7 +67,7 @@ const allOption = {
     addParam: false,
     fold: !G.isMobile,
     m3u8dlRE: false,
-    M3u8HideDownloadedSegments: false,
+    M3u8HideDownloadedSegments: true,
 };
 /* m3u8 解析工具 */
 const hls = new Hls({
@@ -120,8 +120,8 @@ function init() {
     // 获取页面DOM
     if (tabId && tabId != -1) {
         chrome.tabs.sendMessage(parseInt(tabId), { Message: "getPage" }, { frameId: 0 }, function (result) {
-            if (chrome.runtime.lastError) { return; }
-            _data.pageDOM = new DOMParser().parseFromString(result, 'text/html');
+            if (chrome.runtime.lastError || isEmpty(result)) { return; }
+            _data.pageDOM = new DOMParser().parseFromString(sanitizeHtmlString(result), 'text/html');
         });
     }
     loadCSS();
@@ -519,6 +519,11 @@ hls.on(Hls.Events.LEVEL_LOADED, function (event, data) {
             fileName = fileName.substring(fileName.length - 150);
         }
         $options.append(`<option value="${fileName}">${fileName}</option>`);
+        // 再添加一个 去掉后缀的 fileName
+        const fileNameNoExt = GetFileNameNoExt(fileName);
+        if (fileNameNoExt != "NULL" && fileNameNoExt.length != 0) {
+            $options.append(`<option value="${stringModify(fileNameNoExt)}">${stringModify(fileNameNoExt)}</option>`);
+        }
     }
 
     // m3u8链接最后一部分
@@ -538,6 +543,12 @@ hls.on(Hls.Events.LEVEL_LOADED, function (event, data) {
 
 // 监听 ERROR m3u8解析错误
 hls.on(Hls.Events.ERROR, function (event, data) {
+    /*
+    * hls.js 1.7.0+ detachMedia/stopLoad 中止正在加载的切片时会同步触发
+    * details == "aborted" (INTERNAL_ABORTED) 的非致命错误 属于正常流程 忽略
+    * 否则会被当成下载失败 显示错误面板甚至自动刷新页面
+    */
+    if (!data.fatal && data.details == "aborted") { return; }
 
     /**
      * 如果m3u8清单获取错误 尝试从缓存获取 解决部分网站一次性url问题
@@ -959,7 +970,9 @@ $("#play").click(function () {
         hls.attachMedia($("#video")[0]);
         $(this).html(i18n.close).data("switch", "off");
         hls.on(Hls.Events.MEDIA_ATTACHED, function () {
-            video.play();
+            // 探测结束后 stream controller 已停止 1.7+ 重新attach不会自动恢复加载 需要手动startLoad
+            hls.startLoad();
+            $("#video")[0].play();
         });
         return;
     }
@@ -1051,7 +1064,7 @@ $("#mp4").on("change", function () {
         $("#onlyAudio").click();
     }
 });
-$("#StreamSaver").on("change", function () {
+$("#StreamSaver, #StreamTest").on("change", function () {
     if (transmuxer) {
         $(this).prop("checked", !$(this).prop("checked"));
         alert(i18n.runningCannotChangeSettings);
@@ -1253,6 +1266,13 @@ $("#mergeTs").click(async function () {
     // 流式下载
     if ($("#StreamSaver").prop("checked")) {
         fileStream = createStreamSaver(_fragments[0].url);
+        downloadNew();
+        $("#ffmpeg").prop("checked", false);
+        $("#saveAs").prop("checked", false);
+        $("#stopDownload").show();
+        return;
+    }
+    if ($("#StreamTest").prop("checked")) {
         downloadNew();
         $("#ffmpeg").prop("checked", false);
         $("#saveAs").prop("checked", false);
@@ -1496,7 +1516,7 @@ $("#searchingForRealKey").click(function () {
  * @param {number} start 下载范围 开始索引
  * @param {number} end 下载范围 结束索引
  */
-function downloadNew(start = 0, end = _fragments.length) {
+async function downloadNew(start = 0, end = _fragments.length) {
 
     $("#video").hide();
     hls.detachMedia($("#video")[0]);
@@ -1510,6 +1530,42 @@ function downloadNew(start = 0, end = _fragments.length) {
     const down = new Downloader(selectedFragments, parseInt($("#thread").val()));
     down.autoRetry = true;  // 开启自动重试
     $progress.html(`${down.success}/${down.total}`);
+
+    if ($("#StreamTest").prop("checked")) {
+        let ext = (down.mapTag && !down.mapTag.startsWith("data:") ? down.mapTag : down.fragments[0].url).split("/").pop();
+        ext = ext.split("?").shift();
+        ext = ext.split(".").pop();
+        ext = ext ? ext : "ts";
+        ext = (downSet.mp4 && !down.mapTag) ? "mp4" : ext;
+        let fileName = "";
+        const customFilename = $('#customFilename').val().trim();
+        if (customFilename) {
+            fileName = customFilename;
+        } else if (_fileName) {
+            fileName = _fileName;
+        } else {
+            fileName = GetFileName(_m3u8Url);
+        }
+        let originalExt = null;
+        if (/\.[a-zA-Z0-9]{1,4}$/.test(fileName)) {
+            fileName = fileName.split(".");
+            originalExt = fileName.pop();
+            fileName = fileName.join(".");
+        }
+        if (customFilename && originalExt) {
+            fileName += "." + originalExt;
+        } else {
+            fileName = fileName + "." + ext;
+        }
+        fileStream = await createStreamSaverNew(_fragments[0].url, fileName);
+        if (!fileStream) {
+            down.destroy();
+            $("#stopDownload").hide();
+            buttonState("#mergeTs", true);
+            initDownload();
+            return;
+        }
+    }
 
     // 储存切片所需 DOM 提高性能
     const itemDOM = new Map();
@@ -1861,7 +1917,7 @@ function mergeTsNew(down) {
             output: fileName,
             name: "memory" + new Date().getTime() + "." + ext,
             active: G.isMobile || !autoDown,
-            tabId: currentTabId,
+            tabId: currentTabId
         };
         if (_quantity) {
             data.quantity = parseInt(_quantity);
@@ -1954,6 +2010,56 @@ function createStreamSaver(url) {
     streamSaver.mitm = G.streamSaverConfig.url;
     const ext = $("#mp4").prop("checked") ? "mp4" : GetExt(url);
     return streamSaver.createWriteStream(`${GetFileName(url)}.${ext}`).getWriter();
+}
+/**
+ * 创建一个流式文件保存器
+ * @returns {Promise<{write: function, close: function, abort: function}>}
+ */
+async function createStreamSaverNew(url, fileName = null) {
+    try {
+        let suggestedName = fileName ?? GetFileName(url);
+        const handle = await window.showSaveFilePicker({
+            suggestedName: suggestedName
+        });
+
+        // 3. 创建可写流 (WritableStream)
+        const writableStream = await handle.createWritable();
+
+        let isClosed = false;
+
+        return {
+            /**
+             * 写入数据块
+             * @param {ArrayBuffer | Uint8Array | Blob} buffer - 要写入的数据
+             */
+            async write(buffer) {
+                if (isClosed) {
+                    throw new Error('流已经关闭或终止，无法写入数据');
+                }
+                await writableStream.write(buffer);
+            },
+
+            /**
+             * 关闭流，完成保存
+             */
+            async close() {
+                if (isClosed) return;
+                isClosed = true;
+                await writableStream.close();
+            },
+
+            /**
+             * 中断流，放弃保存并清理
+             */
+            async abort() {
+                if (isClosed) return;
+                isClosed = true;
+                await writableStream.abort(new Error('User aborted download'));
+            }
+        };
+    } catch (error) {
+        return false;
+    }
 }
 window.addEventListener('beforeunload', function () {
     fileStream && fileStream.abort();

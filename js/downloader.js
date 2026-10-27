@@ -87,23 +87,15 @@ const createIframeFFmpeg = (callback) => {
             iframeFFmpegReady = true;
             callback && callback();
         };
-        iframeFFmpeg.src = G.ffmpegConfig.url + '?_=' + new Date().getTime();
+        iframeFFmpeg.src = G.ffmpegConfig.url + '?_=iframe';
     }
     return iframeFFmpeg;
 }
 
 function start() {
     // 提前打开ffmpeg页面
-    if (_ffmpeg) {
-        if (G.iframeFFmpeg) {
-            createIframeFFmpeg();
-        } else {
-            chrome.runtime.sendMessage({
-                Message: "catCatchFFmpeg",
-                action: "openFFmpeg",
-                extra: i18n.waitingForMedia
-            });
-        }
+    if (_ffmpeg && G.iframeFFmpeg) {
+        createIframeFFmpeg();
     }
 
     $("#autoClose").prop("checked", _autoClose || G.downAutoClose);
@@ -424,7 +416,7 @@ function sendFile(action, data, fragment) {
             tabId: _tabId,
             data: data,
             version: G.ffmpegConfig.version,
-            index: fragment.index
+            index: fragment.index,
         };
         if (action === "merge") {
             baseData.taskId = _taskId;
@@ -467,7 +459,7 @@ function sendFile(action, data, fragment) {
             action: action,
             files: [{ data: G.isFirefox ? data : URL.createObjectURL(data), name: getUrlFileName(fragment.url), index: fragment.index }],
             title: stringModify(fragment.title),
-            tabId: _tabId
+            tabId: _tabId,
         };
         if (action === "merge") {
             baseData.taskId = _taskId;
